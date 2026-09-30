@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pear: screen sharing that isn't trash</title>
+<meta name="description" content="Share your Mac at native resolution, up to 60 fps, with a pointer that keeps up and a pen for everyone in the call.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0B0D12">
+<meta property="og:title" content="Pear: screen sharing that isn't trash">
+<meta property="og:description" content="Share your Mac at native resolution, up to 60 fps.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Tokens come from the app (Sources/Pear/Support.swift): the call is always
+     dark so the shared screen is the brightest thing on it, and amber, a
+     projector's light, marks only what's live. */
+  :root {
+    --ink: #0B0D12;
+    --tile: #151922;
+    --pear: #FFB340;
+    --on-pear: #221503;
+    --text: #ECEEF2;
+    --muted: #8D94A3;
+    --rule: #1F2430;
+
+    --display: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --measure: 66rem;
+    --radius: 10px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font: 400 1.0625rem/1.55 var(--body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: inherit; }
+
+  :focus-visible {
+    outline: 2px solid var(--pear);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  .wrap {
+    width: min(100% - 2.5rem, var(--measure));
+    margin-inline: auto;
+  }
+
+  /* ---------------------------------------------------------------- bar */
+
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-block: 1.25rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    text-decoration: none;
+    font: 700 1.375rem/1 var(--display);
+    letter-spacing: 0.01em;
+  }
+
+  .brand svg { width: 1.9rem; height: 1.9rem; }
+
+  /* --------------------------------------------------------------- hero */
+
+  .hero {
+    position: relative;
+    text-align: center;
+    padding-top: clamp(2rem, 6vw, 4.5rem);
+    isolation: isolate;
+  }
+
+  /* The join screen's cone of light (PearLight), falling onto the shared screen. */
+  .hero::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -5rem 0 30% 0;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23FFB340' stop-opacity='.22'/%3E%3Cstop offset='1' stop-color='%23FFB340' stop-opacity='0'/%3E%3C/linearGradient%3E%3Cpath d='M44 0h12l40 100H4z' fill='url(%23g)'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+    filter: blur(48px);
+    pointer-events: none;
+  }
+
+  h1 {
+    margin: 0 auto;
+    max-width: 13ch;
+    font: 800 clamp(2.75rem, 8vw, 5.75rem)/0.98 var(--display);
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  .lede {
+    margin: 1.5rem auto 0;
+    max-width: 34rem;
+    color: var(--muted);
+    font-size: clamp(1.0625rem, 1.6vw, 1.1875rem);
+    text-wrap: pretty;
+  }
+
+  .get { margin-top: 2.25rem; }
+
+  .download {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.95rem 1.6rem 0.95rem 1.35rem;
+    border-radius: var(--radius);
+    background: var(--pear);
+    color: var(--on-pear);
+    text-decoration: none;
+    font: 700 1.125rem/1 var(--display);
+    box-shadow: 0 0 0 1px rgb(255 179 64 / 0.4), 0 10px 40px -10px rgb(255 179 64 / 0.55);
+    transition: background-color 120ms ease, transform 120ms ease;
+  }
+
+  .download:hover { background: #FFC266; }
+  .download:active { transform: translateY(1px); }
+  .download svg { width: 1.1rem; height: 1.1rem; }
+
+  .meta {
+    margin: 0.9rem 0 0;
+    color: var(--muted);
+    font: 400 0.8125rem/1.4 var(--mono);
+  }
+
+  /* -------------------------------------------------------------- stage */
+
+  .stage {
+    margin: clamp(2.75rem, 6vw, 4.5rem) 0 0;
+    text-align: left;
+  }
+
+  .tile {
+    position: relative;
+    aspect-ratio: 3024 / 1964;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--tile);
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 30px 80px -30px rgb(0 0 0 / 0.9);
+  }
+
+  .tile canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Each side is a different viewer's screen, showing your pointer as they
+     get it, and cut off at the divider. */
+  .viewer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .viewer.them { clip-path: inset(0 calc((1 - var(--split, 0.5)) * 100%) 0 0); }
+  .viewer.pear { clip-path: inset(0 0 0 calc(var(--split, 0.5) * 100%)); }
+
+  /* The size of the macOS arrow, tip on the hotspot. */
+  .pointer {
+    position: absolute;
+    width: 13px;
+    height: auto;
+    translate: -1px -1px;
+    filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.35));
+  }
+
+  /* Drawn into the video, so it's as soft as the picture. */
+  .viewer.them .pointer { filter: blur(0.8px) drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.35)); }
+
+  /* On Pear's side the viewer's pointer is the one you see, so the system
+     pointer steps aside for it. */
+  .tile.on-pear .compare { cursor: none; }
+
+  .divider {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--split, 0.5) * 100%);
+    width: 2px;
+    margin-left: -1px;
+    background: rgb(255 255 255 / 0.9);
+    box-shadow: 0 0 12px rgb(0 0 0 / 0.5);
+    pointer-events: none;
+  }
+
+  .divider::after {
+    content: "\2039\2002\203A";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    translate: -50% -50%;
+    border-radius: 50%;
+    background: var(--ink);
+    border: 2px solid rgb(255 255 255 / 0.9);
+    color: var(--text);
+    font: 700 1.125rem/1 var(--body);
+  }
+
+  /* A native range input over the whole screen: drag anywhere, arrow keys,
+     touch, and screen readers all work without custom handling. */
+  .compare {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: default;
+    -webkit-appearance: none;
+    appearance: none;
+    touch-action: pan-y;
+  }
+
+  .compare::-webkit-slider-thumb { -webkit-appearance: none; width: 1px; height: 100vh; }
+  .compare::-moz-range-thumb { width: 1px; height: 100vh; border: 0; }
+
+  .tile:has(.compare:focus-visible) .divider::after {
+    outline: 2px solid var(--pear);
+    outline-offset: 3px;
+  }
+
+  .label {
+    position: absolute;
+    top: 7%;
+    padding: 0.4rem 0.65rem;
+    border-radius: 999px;
+    background: rgb(11 13 18 / 0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: var(--text);
+    font: 500 0.75rem/1.2 var(--mono);
+    white-space: nowrap;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+
+  .label span { color: var(--muted); font-weight: 400; }
+  .label.them { left: 2.5%; }
+  .label.pear { right: 2.5%; }
+  .label.pear::before {
+    content: "";
+    display: inline-block;
+    width: 0.45rem;
+    height: 0.45rem;
+    margin-right: 0.45rem;
+    border-radius: 50%;
+    background: var(--pear);
+    box-shadow: 0 0 8px var(--pear);
+    vertical-align: 0.05rem;
+  }
+  .label[hidden] { display: block; opacity: 0; }
+
+  .stage figcaption {
+    margin-top: 1.25rem;
+    max-width: 40rem;
+    color: var(--muted);
+    font-size: 0.9375rem;
+  }
+
+  /* ----------------------------------------------------------- sections */
+
+  .section {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: 1.5rem 3rem;
+    padding-block: clamp(3.5rem, 8vw, 6rem) 0;
+  }
+
+  .section h2 {
+    margin: 0;
+    font: 700 clamp(1.5rem, 2.6vw, 1.875rem)/1.1 var(--display);
+    letter-spacing: -0.005em;
+  }
+
+  .section p { margin: 0; color: var(--muted); max-width: 40rem; }
+
+  main { padding-bottom: clamp(4rem, 9vw, 7rem); }
+
+  @media (max-width: 720px) {
+    .section { grid-template-columns: 1fr; }
+    .label span { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .download { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="wrap bar">
+  <a class="brand" href="./">
+    <svg viewBox="158 176 690 690" aria-hidden="true">
+      <defs>
+        <radialGradient id="skin" cx="0.38" cy="0.6" r="0.75">
+          <stop offset="0" stop-color="#FFDB94"/>
+          <stop offset="0.55" stop-color="#FFB340"/>
+          <stop offset="1" stop-color="#E0850A"/>
+        </radialGradient>
+        <linearGradient id="leaf" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stop-color="#6FA83A"/>
+          <stop offset="1" stop-color="#A5D65B"/>
+        </linearGradient>
+      </defs>
+      <path d="M512 262 C 540 238 548 210 560 186" fill="none" stroke="#6B4423" stroke-width="24" stroke-linecap="round"/>
+      <path d="M512 275 C 450 275 422 318 416 380 C 409 448 386 490 348 538 C 304 594 284 646 284 704 C 284 810 380 866 494 866 C 608 866 704 810 704 704 C 704 646 684 594 640 538 C 602 490 579 448 572 380 C 566 318 544 275 512 275 Z" fill="url(#skin)"/>
+      <path d="M556 232 C 594 176 668 164 722 184 C 686 240 612 258 556 232 Z" fill="url(#leaf)"/>
+      <ellipse cx="400" cy="660" rx="34" ry="92" transform="rotate(14 400 660)" fill="#FFFFFF" opacity="0.4"/>
+    </svg>
+    Pear
+  </a>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <h1>Screen sharing that isn't trash.</h1>
+    <p class="lede">Share your Mac at native resolution, up to 60 fps, with a
+      pointer that keeps up and a pen for everyone in the call.</p>
+
+    <div class="get">
+      <a class="download" href="https://github.com/gavinomelia/pear/releases/latest/download/Pear.dmg">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5v10m0 0-4-4m4 4 4-4M3.5 16.5h13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Download for Mac
+      </a>
+      <p class="meta">macOS 14 or later · Apple silicon and Intel<span id="version"></span></p>
+    </div>
+
+    <figure class="stage">
+      <div class="tile">
+        <canvas id="screen" aria-hidden="true"></canvas>
+        <span class="label them">Typical screen share <span>· 1512×982</span></span>
+        <span class="label pear">Pear <span>· 3024×1964</span></span>
+        <div class="divider" aria-hidden="true"></div>
+        <div class="viewer them" aria-hidden="true">
+          <svg class="pointer" viewBox="0 0 12 18" hidden><path d="M1 1v14.2l3.5-3.4 2.3 5.4 2.3-1-2.3-5.3H11.8z" fill="#000" stroke="#fff" stroke-width="1.1" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="viewer pear" aria-hidden="true">
+          <svg class="pointer" viewBox="0 0 12 18" hidden><path d="M1 1v14.2l3.5-3.4 2.3 5.4 2.3-1-2.3-5.3H11.8z" fill="#000" stroke="#fff" stroke-width="1.1" stroke-linejoin="round"/></svg>
+        </div>
+        <input class="compare" type="range" min="0" max="100" step="0.1" value="50"
+          aria-label="Compare typical screen sharing, on the left, with Pear, on the right">
+      </div>
+      <figcaption>Drag to compare.</figcaption>
+    </figure>
+  </section>
+
+  <section class="section" aria-labelledby="first-launch">
+    <h2 id="first-launch">First launch</h2>
+    <p>To share your screen, turn on Pear in System Settings → Privacy &amp; Security →
+      Screen Recording, then reopen it. macOS only applies that permission after a relaunch.</p>
+  </section>
+
+</main>
+
+<script>
+(() => {
+  const REPO = "gavinomelia/pear";
+
+  // Version and size of the current download, when GitHub will say. The
+  // button works without it: it always points at the latest release.
+  fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((release) => {
+      const dmg = release?.assets?.find((a) => a.name === "Pear.dmg");
+      if (!dmg) return;
+      const mb = Math.max(1, Math.round(dmg.size / 1e6));
+      document.getElementById("version").textContent =
+        ` · ${release.tag_name.replace(/^v/, "Version ")} · ${mb} MB`;
+    })
+    .catch(() => {});
+
+  // ------------------------------------------------------------------------
+  // The shared screen, twice: painted at the visitor's full backing
+  // resolution for Pear's side, and at half of it in each direction, a
+  // Retina Mac's points, for the typical side.
+  // ------------------------------------------------------------------------
+  const canvas = document.getElementById("screen");
+  const ctx = canvas.getContext("2d");
+  const tile = canvas.parentElement;
+  const compare = tile.querySelector(".compare");
+  const latePointer = tile.querySelector(".viewer.them .pointer");
+  const livePointer = tile.querySelector(".viewer.pear .pointer");
+  const them = tile.querySelector(".label.them");
+  const pear = tile.querySelector(".label.pear");
+
+  // Design space: 1000 wide, the aspect of a 3024×1964 panel.
+  const W = 1000;
+  const H = (W * 1964) / 3024;
+
+  const SOURCE = [
+    [129, "    /// True native pixel dimensions and refresh rate of a display."],
+    [130, "    ///"],
+    [131, "    /// `SCDisplay.width`/`height` are in **points**, not pixels. On any Retina"],
+    [132, "    /// display that is half the real resolution — capturing at those numbers"],
+    [133, "    /// silently throws away three quarters of the pixels, which is the single"],
+    [134, "    /// most common reason a screen share looks soft."],
+    [135, "    public static func nativeMode(for displayID: CGDirectDisplayID) -> (width: Int, height: Int, refreshRate: Int) {"],
+    [136, "        guard let mode = CGDisplayCopyDisplayMode(displayID) else {"],
+    [137, "            return (1920, 1080, 60)"],
+    [138, "        }"],
+    [139, "        // Some displays report 0 Hz (meaning \"variable\"); fall back to the"],
+    [140, "        // NSScreen value, which accounts for ProMotion."],
+    [141, "        var refresh = Int(mode.refreshRate.rounded())"],
+    [142, "        if refresh <= 0 {"],
+    [143, "            refresh = Self.screen(for: displayID)?.maximumFramesPerSecond ?? 60"],
+    [144, "        }"],
+    [145, "        return (mode.pixelWidth, mode.pixelHeight, max(1, refresh))"],
+    [146, "    }"],
+    [147, ""],
+    [148, "    public static func screen(for displayID: CGDirectDisplayID) -> NSScreen? {"],
+    [149, "        NSScreen.screens.first {"],
+    [150, "            let key = NSDeviceDescriptionKey(\"NSScreenNumber\")"],
+    [151, "            return ($0.deviceDescription[key] as? NSNumber)?.uint32Value == displayID"],
+    [152, "        }"],
+    [153, "    }"],
+  ];
+  const CURRENT_LINE = 145;
+
+  const FILES = [
+    [0, "Pear", false], [1, "Sources", false], [2, "PearCore", false], [3, "Media", false],
+    [4, "AudioIO.swift"], [4, "CameraCapturer.swift"], [4, "CursorTracker.swift"],
+    [4, "LatencyMeter.swift"], [4, "LocalPreviewRenderer.swift"], [4, "Permissions.swift"],
+    [4, "RemoteCursor.swift"], [4, "ScreenCapturer.swift", true], [4, "VideoEncoder.swift"],
+    [4, "VideoTrackRenderer.swift"], [3, "Model", false], [3, "Net", false], [3, "Protocol", false],
+    [2, "Pear", false],
+  ];
+
+  // Xcode's Default (Light) theme.
+  const C = {
+    plain: "#262626", keyword: "#9B2393", type: "#3900A0", call: "#326D74",
+    declaration: "#0F68A0", number: "#1C00CF", string: "#C41A16", comment: "#5D6C79",
+  };
+  const KEYWORDS = new Set(["public", "static", "func", "guard", "let", "var", "else",
+    "return", "if", "as", "Self"]);
+
+  const MONO = '11px "JetBrains Mono", ui-monospace, Menlo, monospace';
+  const UI = '10px -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
+
+  function highlight(line) {
+    const cut = line.indexOf("//");
+    const code = cut >= 0 ? line.slice(0, cut) : line;
+    const tokens = [];
+    const re = /("[^"]*")|([A-Za-z_$][\w$]*)|(\d+)|(\s+|.)/g;
+    let match, previous = "";
+    while ((match = re.exec(code))) {
+      const [text, string, word, number] = match;
+      let color = C.plain;
+      if (string) color = C.string;
+      else if (number) color = C.number;
+      else if (word) {
+        if (KEYWORDS.has(word)) color = C.keyword;
+        else if (previous === "func") color = C.declaration;
+        else if (/^[A-Z]/.test(word)) color = C.type;
+        else if (code[re.lastIndex] === "(" || code[re.lastIndex] === " " && code[re.lastIndex + 1] === "{") color = C.call;
+        previous = word;
+      }
+      tokens.push([text, color]);
+    }
+    if (cut >= 0) tokens.push([line.slice(cut), C.comment]);
+    return tokens;
+  }
+
+  function roundRect(c, x, y, w, h, r, fill) {
+    c.beginPath();
+    c.roundRect(x, y, w, h, r);
+    c.fillStyle = fill;
+    c.fill();
+  }
+
+  // Paints the screen in design units.
+  function paint(c) {
+    const desktop = c.createLinearGradient(0, 0, W, H);
+    desktop.addColorStop(0, "#3B4A66");
+    desktop.addColorStop(1, "#1A2133");
+    c.fillStyle = desktop;
+    c.fillRect(0, 0, W, H);
+
+    // Menu bar.
+    c.fillStyle = "rgba(246, 246, 248, 0.86)";
+    c.fillRect(0, 0, W, 16);
+    c.font = UI;
+    c.textBaseline = "middle";
+    c.fillStyle = "#1D1D1F";
+    let mx = 16;
+    for (const item of ["Xcode", "File", "Edit", "View", "Find", "Navigate", "Editor", "Product", "Debug", "Window", "Help"]) {
+      c.font = item === "Xcode" ? UI.replace("10px", "600 10px") : UI;
+      c.fillText(item, mx, 8.5);
+      mx += c.measureText(item).width + 14;
+    }
+
+    // Window.
+    const win = { x: 34, y: 34, w: 932, h: 594 };
+    c.save();
+    c.shadowColor = "rgba(0, 0, 0, 0.45)";
+    c.shadowBlur = 30;
+    c.shadowOffsetY = 10;
+    roundRect(c, win.x, win.y, win.w, win.h, 10, "#FFFFFF");
+    c.restore();
+
+    c.save();
+    c.beginPath();
+    c.roundRect(win.x, win.y, win.w, win.h, 10);
+    c.clip();
+
+    // Title bar and traffic lights.
+    c.fillStyle = "#F4F4F6";
+    c.fillRect(win.x, win.y, win.w, 30);
+    c.fillStyle = "#E2E2E6";
+    c.fillRect(win.x, win.y + 30, win.w, 1);
+    [["#FF5F57", 0], ["#FEBC2E", 1], ["#28C840", 2]].forEach(([color, i]) => {
+      c.beginPath();
+      c.arc(win.x + 16 + i * 17, win.y + 15, 5.5, 0, Math.PI * 2);
+      c.fillStyle = color;
+      c.fill();
+    });
+    c.font = UI.replace("10px", "600 10.5px");
+    c.fillStyle = "#3A3A3C";
+    c.textAlign = "center";
+    c.fillText("ScreenCapturer.swift", win.x + win.w / 2, win.y + 15.5);
+    c.textAlign = "left";
+
+    // Navigator.
+    const nav = { x: win.x, y: win.y + 31, w: 206, h: win.h - 31 };
+    c.fillStyle = "#F0F0F3";
+    c.fillRect(nav.x, nav.y, nav.w, nav.h);
+    c.fillStyle = "#E2E2E6";
+    c.fillRect(nav.x + nav.w, nav.y, 1, nav.h);
+    c.font = UI;
+    FILES.forEach(([depth, name, selected], i) => {
+      const y = nav.y + 18 + i * 19;
+      if (selected) roundRect(c, nav.x + 6, y - 9, nav.w - 12, 18, 5, "#D4E3FB");
+      const x = nav.x + 12 + depth * 10;
+      const folder = selected === false;
+      c.fillStyle = folder ? "#5B9BF0" : "#F29B48";
+      roundRect(c, x, y - 4, 8, 8, 1.5, c.fillStyle);
+      c.fillStyle = "#1D1D1F";
+      c.fillText(name, x + 13, y + 0.5);
+    });
+
+    // Code.
+    const code = { x: nav.x + nav.w + 1, y: nav.y, w: win.x + win.w - (nav.x + nav.w + 1), h: nav.h };
+    c.save();
+    c.beginPath();
+    c.rect(code.x, code.y, code.w, code.h);
+    c.clip();
+    c.font = MONO;
+    const lineHeight = 18.5;
+    const gutter = code.x + 40;
+    const textX = gutter + 14;
+    SOURCE.forEach(([number, text], i) => {
+      const y = code.y + 20 + i * lineHeight;
+      if (number === CURRENT_LINE) {
+        c.fillStyle = "#EAF1FD";
+        c.fillRect(code.x, y - lineHeight / 2, code.w, lineHeight);
+      }
+      c.fillStyle = number === CURRENT_LINE ? "#262626" : "#A6A6AB";
+      c.textAlign = "right";
+      c.fillText(String(number), gutter, y + 0.5);
+      c.textAlign = "left";
+      let x = textX;
+      for (const [token, color] of highlight(text)) {
+        c.fillStyle = color;
+        c.fillText(token, x, y + 0.5);
+        x += c.measureText(token).width;
+      }
+    });
+    c.restore();
+    c.restore();
+  }
+
+  const sharp = document.createElement("canvas");
+  const soft = document.createElement("canvas");
+  let split = 0.5;
+
+  function render() {
+    const scale = window.devicePixelRatio || 1;
+    const width = Math.round(tile.clientWidth * scale);
+    const height = Math.round(tile.clientHeight * scale);
+    if (!width || !height) return;
+    for (const c of [canvas, sharp]) { c.width = width; c.height = height; }
+    soft.width = Math.round(width / 2);
+    soft.height = Math.round(height / 2);
+
+    const s = sharp.getContext("2d");
+    s.setTransform(width / W, 0, 0, height / H, 0, 0);
+    paint(s);
+    const sc = soft.getContext("2d");
+    sc.imageSmoothingQuality = "high";
+    sc.drawImage(sharp, 0, 0, soft.width, soft.height);
+    compose();
+  }
+
+  function compose() {
+    tile.style.setProperty("--split", split);
+    const latest = trail[trail.length - 1];
+    tile.classList.toggle("on-pear", !!latest && latest.x >= split);
+    them.hidden = split < 0.25;
+    pear.hidden = split > 0.75;
+    if (!canvas.width) return;
+    ctx.drawImage(sharp, 0, 0);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, canvas.width * split, canvas.height);
+    ctx.clip();
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(soft, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
+  compare.addEventListener("input", () => {
+    split = compare.valueAsNumber / 100;
+    compose();
+  });
+
+  // Your pointer as each viewer sees it. A typical share draws it into the
+  // video, so it arrives with the frame: late, and only as often as frames
+  // are sent. Pear sends it on its own, so it's where yours is. The lag here
+  // is illustrative, not a measurement.
+  const LAG = 150;
+  const FRAME = 1000 / 30;
+  const trail = [];
+  let following = false;
+
+  function place(element, sample) {
+    element.style.left = `${sample.x * 100}%`;
+    element.style.top = `${sample.y * 100}%`;
+    element.removeAttribute("hidden");
+  }
+
+  function follow(now) {
+    if (!following) return;
+    const shown = Math.floor((now - LAG) / FRAME) * FRAME;
+    let sample = trail[0];
+    for (const s of trail) {
+      if (s.t > shown) break;
+      sample = s;
+    }
+    place(latePointer, sample);
+    while (trail.length > 1 && trail[1].t < now - LAG - FRAME) trail.shift();
+    requestAnimationFrame(follow);
+  }
+
+  tile.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse") return;
+    const box = tile.getBoundingClientRect();
+    const sample = {
+      t: performance.now(),
+      x: (event.clientX - box.left) / box.width,
+      y: (event.clientY - box.top) / box.height,
+    };
+    trail.push(sample);
+    // Straight from the event, not the next animation frame: this one has to
+    // stay under the real pointer.
+    place(livePointer, sample);
+    tile.classList.toggle("on-pear", sample.x >= split);
+    if (!following) {
+      following = true;
+      requestAnimationFrame(follow);
+    }
+  });
+
+  tile.addEventListener("pointerleave", () => {
+    following = false;
+    trail.length = 0;
+    latePointer.setAttribute("hidden", "");
+    livePointer.setAttribute("hidden", "");
+    tile.classList.remove("on-pear");
+  });
+
+  let resizeFrame = 0;
+  new ResizeObserver(() => {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(render);
+  }).observe(tile);
+
+  Promise.all([
+    document.fonts.load(MONO),
+    document.fonts.load('800 10px "Nunito"'),
+  ]).catch(() => {}).then(render);
+})();
+</script>
+</body>
+</html>
